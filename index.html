@@ -1,0 +1,359 @@
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Dashboard</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdn.datatables.net/1.11.3/js/jquery.dataTables.min.js"></script>
+    <link rel="stylesheet" href="https://cdn.datatables.net/1.11.3/css/jquery.dataTables.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+    <style>
+        body {
+            font-family: 'Roboto', sans-serif;
+        }
+        .sticker {
+            display: inline-block;
+            padding: 0.2em 0.5em;
+            margin-left: 0.5em;
+            border-radius: 0.25em;
+            font-size: 0.75em;
+            color: white;
+        }
+        .sticker-top {
+            background-color: #4CAF50;
+        }
+        .sticker-bottom {
+            background-color: #F44336;
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
+
+    <!-- Header -->
+    <header class="bg-indigo-700 text-white p-4 flex justify-between items-center">
+        <h1 class="text-2xl font-bold">Bengaluru Class Averages</h1>
+        <img src="https://i.imgur.com/dclvAGc.jpg" alt="Company Logo" class="h-10">
+    </header>
+
+    <!-- Main Content -->
+    <div class="container mx-auto p-4">
+        <!-- Search Bar -->
+        <div class="flex items-center mb-4">
+            <input type="text" id="search-bar" class="w-full p-2 border border-gray-300 rounded" placeholder="Search...">
+            <button class="ml-2 p-2 bg-blue-600 text-white rounded"><i class="fas fa-search"></i></button>
+            <button class="ml-2 p-2 bg-blue-600 text-white rounded"><i class="fas fa-microphone"></i></button>
+        </div>
+
+        <!-- Filters -->
+        <div class="grid grid-cols-1 md:grid-cols-5 gap-4 mb-4">
+            <select id="filter-day" class="p-2 border border-gray-300 rounded" multiple>
+                <option value="">Day</option>
+            </select>
+            <select id="filter-format" class="p-2 border border-gray-300 rounded" multiple>
+                <option value="">Format</option>
+            </select>
+            <select id="filter-instructor" class="p-2 border border-gray-300 rounded">
+                <option value="">Instructor</option>
+            </select>
+            <select id="filter-center" class="p-2 border border-gray-300 rounded">
+                <option value="">Center</option>
+            </select>
+            <select id="filter-period" class="p-2 border border-gray-300 rounded">
+                <option value="">Period</option>
+            </select>
+        </div>
+
+        <!-- Date Range Picker -->
+        <div class="mb-4">
+            <input type="text" id="date-range-picker" class="w-full p-2 border border-gray-300 rounded" placeholder="Select Date Range">
+        </div>
+
+        <!-- Remove All Filters Button -->
+        <div class="mb-4">
+            <button id="reset-filters" class="p-2 bg-red-600 text-white rounded">Remove All Filters</button>
+        </div>
+
+        <!-- Data Table -->
+        <div class="mb-4">
+            <table id="data-table" class="display w-full"></table>
+        </div>
+
+        <!-- Charts -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="bg-white p-4 rounded shadow">
+                <canvas id="chart1"></canvas>
+            </div>
+            <div class="bg-white p-4 rounded shadow">
+                <canvas id="chart2"></canvas>
+            </div>
+        </div>
+
+        <!-- Detailed View Modal -->
+        <div id="detail-modal" class="fixed inset-0 bg-gray-800 bg-opacity-75 flex items-center justify-center hidden">
+            <div class="bg-white p-4 rounded shadow-lg w-3/4">
+                <h2 class="text-xl font-bold mb-4">Session Details</h2>
+                <div id="detail-content"></div>
+                <button id="close-modal" class="mt-4 p-2 bg-blue-600 text-white rounded">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Authentication and Data Fetching
+        let credentials = {
+            access_token: "",
+            refresh_token: "1//04MmvT_BibTsBCgYIARAAGAQSNwF-L9IrG9yxJvvQRMLPR39xzWSrqfTVMkvq3WcZqsDO2HjUkV6s7vo1pQkex4qGF3DITTiweAA",
+            expires_in: 3599,
+            scope: "https://www.googleapis.com/auth/spreadsheets",
+            token_type: "Bearer",
+            expiration_time: 0
+        };
+
+        async function refreshAccessToken() {
+            const response = await fetch("https://oauth2.googleapis.com/token", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/x-www-form-urlencoded"
+                },
+                body: new URLSearchParams({
+                    client_id: "416630995185-007ermh3iidknbbtdmu5vct207mdlbaa.apps.googleusercontent.com",
+                    client_secret: "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",
+                    refresh_token: credentials.refresh_token,
+                    grant_type: "refresh_token"
+                })
+            });
+            const tokenData = await response.json();
+            credentials.access_token = tokenData.access_token;
+            credentials.expiration_time = Date.now() + tokenData.expires_in * 1000;
+        }
+
+        async function fetchData(sheetName) {
+            if (!credentials.access_token || Date.now() > credentials.expiration_time) {
+                await refreshAccessToken();
+            }
+            const response = await fetch(`https://sheets.googleapis.com/v4/spreadsheets/1UI4mz-_LKdre6eG7K5rk77XGTRZa6bMxk61H84uqKQA/values/${sheetName}!A2:Z`, {
+                headers: {
+                    "Authorization": `Bearer ${credentials.access_token}`
+                }
+            });
+            const data = await response.json();
+            return data.values;
+        }
+
+        // Initialize DataTable
+        async function initializeDataTable() {
+            const data = await fetchData("Sessions3");
+            const tableData = data.map(row => ({
+                format: row[0],
+                location: row[1],
+                day: row[2],
+                time: row[3],
+                trainerName: row[4],
+                period: row[5],
+                capacity: row[6],
+                bookings: row[7],
+                checkins: row[8],
+                sessions: row[9],
+                average: parseFloat(row[10]),
+                complimentary: row[11],
+                uniqueId: row[12]
+            }));
+
+            // Add stickers for top 10 and bottom 10 average values
+            const sortedByAverage = [...tableData].sort((a, b) => b.average - a.average);
+            const top10 = sortedByAverage.slice(0, 10).map(item => item.uniqueId);
+            const bottom10 = sortedByAverage.slice(-10).map(item => item.uniqueId);
+
+            const table = $('#data-table').DataTable({
+                data: tableData,
+                columns: [
+                    { title: "Format", data: "format" },
+                    { title: "Location", data: "location" },
+                    { title: "Day", data: "day" },
+                    { title: "Time", data: "time" },
+                    { title: "Trainer Name", data: "trainerName" },
+                    { title: "Period", data: "period" },
+                    { title: "Capacity", data: "capacity" },
+                    { title: "Bookings", data: "bookings" },
+                    { title: "Checkins", data: "checkins" },
+                    { title: "Sessions", data: "sessions" },
+                    { title: "Average", data: "average", render: (data, type, row) => {
+                        let sticker = '';
+                        if (top10.includes(row.uniqueId)) {
+                            sticker = '<span class="sticker sticker-top">Top 10</span>';
+                        } else if (bottom10.includes(row.uniqueId)) {
+                            sticker = '<span class="sticker sticker-bottom">Bottom 10</span>';
+                        }
+                        return `${data} ${sticker}`;
+                    }},
+                    { title: "Complimentary", data: "complimentary" },
+                    { title: "Unique ID", data: "uniqueId" }
+                ],
+                paging: true,
+                searching: true,
+                ordering: true,
+                order: [[10, 'desc']],
+                responsive: true,
+                autoWidth: false,
+                dom: 'Bfrtip',
+                buttons: [
+                    'copy', 'csv', 'excel', 'pdf', 'print'
+                ]
+            });
+
+            // Populate Filters
+            const uniqueValues = (index) => [...new Set(data.map(row => row[index]))];
+            const populateFilter = (filterId, values) => {
+                const filter = document.getElementById(filterId);
+                values.forEach(value => {
+                    const option = document.createElement("option");
+                    option.value = value;
+                    option.textContent = value;
+                    filter.appendChild(option);
+                });
+            };
+
+            populateFilter("filter-day", uniqueValues(2));
+            populateFilter("filter-format", uniqueValues(0));
+            populateFilter("filter-instructor", uniqueValues(4));
+            populateFilter("filter-center", uniqueValues(1));
+            populateFilter("filter-period", uniqueValues(5));
+
+            // Initialize Select2 for multi-select
+            $('#filter-day').select2();
+            $('#filter-format').select2();
+
+            // Filter Event Listeners
+            $('#filter-day').on('change', function() {
+                table.column(2).search($(this).val().join('|'), true, false).draw();
+            });
+            $('#filter-format').on('change', function() {
+                table.column(0).search($(this).val().join('|'), true, false).draw();
+            });
+            $('#filter-instructor').on('change', function() {
+                table.column(4).search($(this).val()).draw();
+            });
+            $('#filter-center').on('change', function() {
+                table.column(1).search($(this).val()).draw();
+            });
+            $('#filter-period').on('change', function() {
+                table.column(5).search($(this).val()).draw();
+            });
+
+            // Reset Filters
+            document.getElementById("reset-filters").addEventListener("click", () => {
+                table.search('').columns().search('').draw();
+                $('#filter-day').val(null).trigger('change');
+                $('#filter-format').val(null).trigger('change');
+                document.getElementById("filter-instructor").value = "";
+                document.getElementById("filter-center").value = "";
+                document.getElementById("filter-period").value = "";
+            });
+
+            // Row Click Event
+            $('#data-table tbody').on('click', 'tr', async function() {
+                const rowData = table.row(this).data();
+                const sessionData = await fetchData("Sessions");
+                const sessionDetails = sessionData.filter(row => row[17] === rowData.uniqueId);
+                displaySessionDetails(sessionDetails);
+            });
+        }
+
+        // Display Session Details
+        function displaySessionDetails(details) {
+            const detailContent = document.getElementById("detail-content");
+            detailContent.innerHTML = details.map(detail => `
+                <p><strong>Trainer Name:</strong> ${detail[3]}</p>
+                <p><strong>Session Name:</strong> ${detail[5]}</p>
+                <p><strong>Capacity:</strong> ${detail[6]}</p>
+                <p><strong>Checked In:</strong> ${detail[7]}</p>
+                <p><strong>Late Cancelled:</strong> ${detail[8]}</p>
+                <p><strong>Booked:</strong> ${detail[9]}</p>
+                <p><strong>Complimentary:</strong> ${detail[10]}</p>
+                <p><strong>Location:</strong> ${detail[11]}</p>
+                <p><strong>Date:</strong> ${detail[12]}</p>
+                <p><strong>Day of Week:</strong> ${detail[13]}</p>
+                <p><strong>Time:</strong> ${detail[14]}</p>
+                <p><strong>Total Paid:</strong> ${detail[15]}</p>
+                <p><strong>Non-Paid Customers:</strong> ${detail[16]}</p>
+                <p><strong>Checked Ins with Memberships:</strong> ${detail[18]}</p>
+                <p><strong>Checked Ins with Packages:</strong> ${detail[19]}</p>
+                <p><strong>Checked Ins with Intro Offers:</strong> ${detail[20]}</p>
+                <p><strong>Checked Ins with Single Classes:</strong> ${detail[21]}</p>
+                <p><strong>Class Type:</strong> ${detail[22]}</p>
+                <p><strong>Cleaned Class:</strong> ${detail[23]}</p>
+            `).join('');
+            document.getElementById("detail-modal").classList.remove("hidden");
+        }
+
+        // Initialize Charts
+        function initializeCharts() {
+            const ctx1 = document.getElementById('chart1').getContext('2d');
+            const chart1 = new Chart(ctx1, {
+                type: 'bar',
+                data: {
+                    labels: ['January', 'February', 'March', 'April', 'May', 'June', 'July'],
+                    datasets: [{
+                        label: 'Sessions',
+                        data: [12, 19, 3, 5, 2, 3, 7],
+                        backgroundColor: 'rgba(54, 162, 235, 0.2)',
+                        borderColor: 'rgba(54, 162, 235, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    scales: {
+                        y: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+
+            const ctx2 = document.getElementById('chart2').getContext('2d');
+            const chart2 = new Chart(ctx2, {
+                type: 'line',
+                data: {
+                    labels: ['January', 'February', 'March', 'April', 'May', 'June', 'July'],
+                    datasets: [{
+                        label: 'Average Attendance',
+                        data: [65, 59, 80, 81, 56, 55, 40],
+                        fill: false,
+                        borderColor: 'rgba(75, 192, 192, 1)',
+                        tension: 0.1
+                    }]
+                },
+                options: {
+                    scales: {
+                        y: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+        }
+
+        // Initialize Everything
+        document.addEventListener("DOMContentLoaded", () => {
+            initializeDataTable();
+            initializeCharts();
+
+            // Close Modal
+            document.getElementById("close-modal").addEventListener("click", () => {
+                document.getElementById("detail-modal").classList.add("hidden");
+            });
+
+            // Search Bar Auto-Suggest
+            $('#search-bar').on('input', function() {
+                const searchTerm = $(this).val().toLowerCase();
+                $('#data-table').DataTable().search(searchTerm).draw();
+            });
+        });
+    </script>
+</body>
+</html>
